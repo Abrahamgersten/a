@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>הודו לה' כי טוב, כי לעולם חסדו</title>
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="manifest" href="manifest.json">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>הודו לה' כי טוב, כי לעולם חסדו</h1>
+            <h2>אתגרו את עצמכם להודות 30 יום ברצף</h2>
+        </header>
+        
+        <main>
+            <section class="today-section">
+                <h3>היום - <span id="current-date"></span></h3>
+                <div class="entries-grid" id="entries">
+                    <!-- שדות הקלט יתווספו כאן דרך JavaScript -->
+                </div>
+                <button id="save-button" class="primary-button">
+                    <span class="button-icon">💾</span>
+                    שמור הודיות
+                </button>
+            </section>
+
+            <section class="filter-section">
+                <h3>סינון הודיות לפי קטגוריה</h3>
+                <select id="category-filter" class="category-filter">
+                    <option value="הכל">הכל</option>
+                    <option value="קטנים">דברים קטנים</option>
+                    <option value="גדולים">דברים גדולים</option>
+                    <option value="קשים">דברים קשים</option>
+                    <option value="יומיומיים">דברים יומיומיים</option>
+                </select>
+            </section>
+
+            <section class="previous-days-section">
+                <h3>ימים קודמים</h3>
+                <div id="previous-days" class="previous-days-grid">
+                    <!-- הימים הקודמים יתווספו כאן דרך JavaScript -->
+                </div>
+            </section>
+
+            <section class="did-you-know-section">
+                <h3>קטע הידעת</h3>
+                <div class="carousel" id="did-you-know-carousel">
+                    <!-- קטעי הידעת יתווספו כאן דרך JavaScript -->
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- מודאל לצפייה בהודעות יומיות -->
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <header class="modal-header">
+                <h3 id="modal-date"></h3>
+                <button class="close-button" aria-label="סגור">×</button>
+            </header>
+            <div class="modal-body">
+                <ul id="modal-entries"></ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- מודאל להוספת הודיות נוספות -->
+    <div id="prompt-modal" class="modal">
+        <div class="modal-content">
+            <header class="modal-header">
+                <h3>הוספת הודיות</h3>
+                <button class="close-button" aria-label="סגור">×</button>
+            </header>
+            <div class="modal-body">
+                <p>כתבת <span id="current-level"></span> הודיות. האם תרצה להוסיף עוד <span id="add-count"></span> הודיות?</p>
+                <div class="modal-buttons">
+                    <button id="confirm-add" class="primary-button">כן, להוסיף</button>
+                    <button id="cancel-add" class="secondary-button">לא, תודה</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- טעינת ספריית התאריך העברי -->
+    <script src="https://unpkg.com/hebcal@2.21.1/dist/hebcal.browser.min.js"></script>
+    <script src="script.js"></script>
+
+    <!-- רישום ה-Service Worker -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js')
+                .then(function(registration) {
+                    console.log('Service Worker registered with scope:', registration.scope);
+                })
+                .catch(function(error) {
+                    console.log('Service Worker registration failed:', error);
+                });
+        }
+    </script>
+</body>
+</html>
