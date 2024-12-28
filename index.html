@@ -220,6 +220,15 @@
 
     let books = JSON.parse(localStorage.getItem("books")) || [];
 
+    // מיפוי בין ספרים לתחיליות הפרקים שלהם
+    const bookChapterPrefixes = {
+      "קיצור שולחן ערוך": ['סימן'],
+      "מסילת ישרים": ['פרק'],
+      "תוספתא": ['סימן'],
+      "משניות": ['סימן', 'פרק'],
+      // הוסף כאן ספרים נוספים עם התחיליות המתאימות
+    };
+
     // פונקציה עם ריטריי וטיימאאוט לבקשות API
     async function fetchWithRetry(url, maxRetries = 3, timeout = 5000) {
       for (let i = 0; i < maxRetries; i++) {
@@ -340,8 +349,27 @@
       loadingDiv.style.display = show ? 'flex' : 'none';
     }
 
-    // הגדרת תחיליות לפרקים
-    const chapterPrefixes = ['פרק', 'סימן', 'שער'];
+    // פונקציה לחישוב התחילית של הפרק הבא בהתאם לספר
+    function determineChapterPrefix(bookName, chapterNumber) {
+      const prefixes = bookChapterPrefixes[bookName] || ['פרק']; // ברירת מחדל לפרקים מספריים
+      const currentPrefix = prefixes[Math.floor((chapterNumber - 1) / prefixes.length)] || 'פרק';
+      
+      // אם התחיליות הן אותיות, נשתמש במערך האותיות העבריות
+      const letters = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ז', 'ח', 'ט', 'י', 'כ', 'ל', 'מ', 'נ', 'ס', 'ע', 'פ', 'צ', 'ק', 'ר', 'ש', 'ת'];
+      if (currentPrefix === 'סימן' || currentPrefix === 'סעיף') {
+        const letterIndex = (chapterNumber - 1) % letters.length;
+        return `${currentPrefix} ${letters[letterIndex]}`;
+      } else {
+        // עבור פרקים מספריים
+        return `${currentPrefix} ${chapterNumber}`;
+      }
+    }
+
+    // פונקציה לחישוב מזהה הפרק הבא בהתאם לפרופיל הספר
+    function getChapterIdentifier(bookName, chapterNumber) {
+      const chapterPrefix = determineChapterPrefix(bookName, chapterNumber);
+      return chapterPrefix;
+    }
 
     // הוספת לימוד חדש
     async function addBook() {
@@ -379,7 +407,7 @@
         // סינון הפסקאות כדי להתחיל מדברי המחבר בלבד
         const processedParagraphs = [];
         let skip = true;
-        let currentChapter = "פרק 1"; // ברירת מחדל
+        let currentChapter = determineChapterPrefix(bookNameInput, 1); // התחלת הפרק הראשון
 
         for (let para of textArray) {
           // בדיקה אם הפסקה מתחילה באחד הסעיפים הלא רצויים
@@ -389,7 +417,7 @@
           }
 
           // בדיקה אם הפסקה מתחילה בפרק
-          const chapterMatch = para.match(new RegExp(`^(${chapterPrefixes.join('|')})\\s*\\w+`));
+          const chapterMatch = para.match(new RegExp(`^(${(bookChapterPrefixes[bookNameInput] || ['פרק']).join('|')})\\s*\\w+`));
           if (chapterMatch) {
             currentChapter = para.trim();
             skip = false;
@@ -412,7 +440,6 @@
 
         // חלוקה לפרקים
         const chaptersMap = {}; // מיפוי פרקים לטקסט שלהם
-        let currentChap = "פרק 1";
         processedParagraphs.forEach(para => {
           if (!chaptersMap[para.chapter]) {
             chaptersMap[para.chapter] = [];
@@ -421,11 +448,16 @@
         });
 
         // יצירת רשימת פרקים
-        const chaptersList = Object.keys(chaptersMap).map((chapterName, index) => ({
-          chapterNumber: index + 1,
-          text: chaptersMap[chapterName].join('\n\n'),
-          chunks: splitIntoChunks(chaptersMap[chapterName].join('\n\n'), wordCount)
-        }));
+        const chaptersList = Object.keys(chaptersMap).map((chapterName, index) => {
+          const chapterNumber = index + 1;
+          const text = chaptersMap[chapterName].join('\n\n');
+          const chunks = splitIntoChunks(text, wordCount);
+          return {
+            chapterNumber: chapterNumber,
+            text: text,
+            chunks: chunks
+          };
+        });
 
         if (chaptersList.length === 0) {
           throw new Error("לא נמצאו פרקים לטעינה.");
@@ -511,11 +543,14 @@
         // במצב 'accumulate' או במצב 'block' ואפשר להתקדם
         if (book.mode === "accumulate" || (book.mode === "block" && book.readChapters.includes(book.currentChapterIndex))) {
           // טען את הפרק הבא
-          await loadNextChapter(book);
-
-          // עדכון אינדקס הפרק
-          book.currentChapterIndex = nextChapterIndex;
-          book.currentChunkIndex = 0;
+          const success = await loadNextChapter(book);
+          if (success) {
+            book.currentChapterIndex = nextChapterIndex;
+            book.currentChunkIndex = 0;
+          } else {
+            alert("לא ניתן לטעון פרק נוסף.");
+            return;
+          }
         } else {
           alert("סיימת את כל הקטעים בספר!");
           return;
@@ -553,9 +588,14 @@
       const chapter = book.chapters[chapterIndex];
       if (!chapter) return;
 
-      chapter.chunks[chunkIndex].read = true;
-      if (!book.readChapters.includes(chapterIndex)) {
-        book.readChapters.push(chapterIndex);
+      chapter.chunks[chunkIndex].read = !chapter.chunks[chunkIndex].read;
+
+      if (chapter.chunks[chunkIndex].read) {
+        if (!book.readChapters.includes(chapterIndex)) {
+          book.readChapters.push(chapterIndex);
+        }
+      } else {
+        book.readChapters = book.readChapters.filter(index => index !== chapterIndex);
       }
 
       localStorage.setItem("books", JSON.stringify(books));
@@ -566,7 +606,7 @@
     async function loadNextChapter(book) {
       const nextChapterNumber = book.chapters.length + 1;
       const chapterPrefix = determineChapterPrefix(book.name, nextChapterNumber);
-      const nextChapterIdentifier = getChapterIdentifier(nextChapterNumber, chapterPrefix);
+      const nextChapterIdentifier = getChapterIdentifier(book.name, nextChapterNumber);
 
       const apiBookName = book.name.replace(/\s+/g, '_');
       const apiUrl = `https://www.sefaria.org/api/texts/${encodeURIComponent(apiBookName)}.${encodeURIComponent(nextChapterIdentifier)}?lang=he`;
@@ -588,7 +628,7 @@
         // סינון הפסקאות כדי להתחיל מדברי המחבר בלבד
         const processedParagraphs = [];
         let skip = true;
-        let currentChapter = `${chapterPrefix}`; // ברירת מחדל
+        let currentChapter = determineChapterPrefix(book.name, nextChapterNumber); // התחלת הפרק הבא
 
         for (let para of textArray) {
           // בדיקה אם הפסקה מתחילה באחד הסעיפים הלא רצויים
@@ -597,8 +637,8 @@
             continue;
           }
 
-          // בדיקה אם הפסקה מתחילה בפרק (אם יש פרקים בתוך הפרק)
-          const chapterMatch = para.match(new RegExp(`^(${chapterPrefixes.join('|')})\\s*\\w+`));
+          // בדיקה אם הפסקה מתחילה בפרק
+          const chapterMatch = para.match(new RegExp(`^(${(bookChapterPrefixes[book.name] || ['פרק']).join('|')})\\s*\\w+`));
           if (chapterMatch) {
             currentChapter = para.trim();
             skip = false;
@@ -620,14 +660,35 @@
         }
 
         // חלוקה לקטעים
-        const chapterText = processedParagraphs.map(p => p.text).join('\n\n');
-        const chunks = splitIntoChunks(chapterText, book.wordCount);
+        const chaptersMap = {}; // מיפוי פרקים לטקסט שלהם
+        processedParagraphs.forEach(para => {
+          if (!chaptersMap[para.chapter]) {
+            chaptersMap[para.chapter] = [];
+          }
+          chaptersMap[para.chapter].push(para.text);
+        });
+
+        // יצירת רשימת פרקים
+        const chaptersList = Object.keys(chaptersMap).map((chapterName, index) => {
+          const chapterNumber = nextChapterNumber;
+          const text = chaptersMap[chapterName].join('\n\n');
+          const chunks = splitIntoChunks(text, book.wordCount);
+          return {
+            chapterNumber: chapterNumber,
+            text: text,
+            chunks: chunks
+          };
+        });
+
+        if (chaptersList.length === 0) {
+          throw new Error(`לא נמצאו פרקים לטעינה בפרק ${nextChapterNumber}.`);
+        }
 
         // הוספת הפרק החדש לספר
         book.chapters.push({
           chapterNumber: nextChapterNumber,
-          text: chapterText,
-          chunks: chunks
+          text: chaptersList[0].text,
+          chunks: chaptersList[0].chunks
         });
 
         // עדכון latestChapterIndex במצב 'block' אם רלוונטי
@@ -636,34 +697,14 @@
         }
 
         localStorage.setItem("books", JSON.stringify(books));
+        return true; // הצלחה
       } catch (err) {
         console.error(err);
         alert(`שגיאה בטעינת הפרק הבא: ${err.message}`);
+        return false;
       } finally {
         showLoadingIndicator(false);
       }
-    }
-
-    // פונקציה לחישוב התחילית של הפרק הבא בהתאם לסוג הפרק
-    function determineChapterPrefix(bookName, chapterNumber) {
-      // לדוגמה, עבור 'קיצור שולחן ערוך', הפרקים הם 'סימן א', 'סימן ב', וכו'
-      // עבור 'מסילת ישרים', הפרקים הם 'פרק 1', 'פרק 2', וכו'
-      // כאן נשתמש בלוגיקה פשוטה, אבל ניתן להתאים לפי הספרים השונים
-      if (bookName.includes("קיצור שולחן ערוך")) {
-        const letters = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ז', 'ח', 'ט', 'י', 'כ', 'ל', 'מ', 'נ', 'ס', 'ע', 'פ', 'צ', 'ק', 'ר', 'ש', 'ת'];
-        if (chapterNumber - 1 < letters.length) {
-          return `סימן ${letters[chapterNumber - 1]}`;
-        }
-      }
-      // ברירת מחדל לפרקים מספריים
-      return `פרק ${chapterNumber}`;
-    }
-
-    // פונקציה לחישוב מזהה הפרק הבא בהתאם לפרופיל הספר
-    function getChapterIdentifier(chapterNumber, chapterPrefix) {
-      // לדוגמה, עבור 'מסילת ישרים' מזהה הפרק הוא 'פרק 1'
-      // עבור 'קיצור שולחן ערוך', מזהה הפרק הוא 'סימן א'
-      return chapterPrefix;
     }
 
     // הצגת לימודים פעילים
@@ -683,10 +724,18 @@
         // כותרת
         const titleDiv = document.createElement("div");
         titleDiv.className = "bookTitle";
+
         const currentChapter = book.chapters[book.currentChapterIndex];
         if (!currentChapter) return;
         const currentChunk = currentChapter.chunks[book.currentChunkIndex];
-        titleDiv.textContent = `${book.name} - ${currentChapter.chapterNumber} קטע ${book.currentChunkIndex + 1} מתוך ${currentChapter.chunks.length}`;
+
+        // הצגת שם הספר ופרק אם קיים
+        if (currentChapter.chapterNumber) {
+          titleDiv.textContent = `${book.name} - ${currentChapter.chapterNumber} קטע ${book.currentChunkIndex + 1} מתוך ${currentChapter.chunks.length}`;
+        } else {
+          titleDiv.textContent = `${book.name}`;
+        }
+
         titleDiv.onclick = () => toggleChunkDisplay(book.id);
         bookDiv.appendChild(titleDiv);
 
@@ -694,7 +743,7 @@
         const chunkP = document.createElement("p");
         chunkP.className = "chunkText";
         chunkP.id = `chunk-${book.id}`;
-        chunkP.textContent = `${currentChapter.chapterNumber} קטע ${book.currentChunkIndex + 1}:\n\n${currentChunk.text}`;
+        chunkP.textContent = `${currentChapter.chapterNumber ? currentChapter.chapterNumber : ''}\n\n${currentChunk.text}`;
         bookDiv.appendChild(chunkP);
 
         // כפתורי ניווט + סימון + מחיקה
