@@ -494,7 +494,9 @@
         autoFirst: true,
         sort: false,
         filter: function(text, input) {
-          return Fuse.utils.escapeRegex(input).test(text) || this.FILTER_CONTAINS(text, input);
+          const escapedInput = input.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+          const regex = new RegExp(escapedInput, 'i');
+          return regex.test(text) || Awesomplete.FILTER_CONTAINS(text, input);
         }
       });
 
@@ -1005,7 +1007,7 @@
     function markCurrentChunkAsRead(bookId) {
       const book = books.find(b => b.id === bookId);
       if (!book) return;
-      markChunkAsRead(bookId, book.currentChapterIndex, book.currentChunkIndex);
+      markChunkAsRead(book.id, book.currentChapterIndex, book.currentChunkIndex);
     }
 
     // תמיכה במובייל - סוואיפים
