@@ -446,7 +446,7 @@
           }
 
           // בדיקה אם הפסקה מתחילה בפרק
-          const chapterMatch = para.match(/^([פרק|סימן|שער]+\s*[א-ת]+)/);
+          const chapterMatch = para.match(new RegExp(`^(${chapterPrefixes.join('|')})\\s*[א-ת]+`));
           if (chapterMatch) {
             currentChapter = getChapterIdentifier(bookNameInput, processedParagraphs.length + 1); // עדכון מזהה הפרק
             skip = false;
@@ -658,7 +658,7 @@
           }
 
           // בדיקה אם הפסקה מתחילה בפרק עם תחיליות שונות
-          const chapterMatch = para.match(/^([פרק|סימן|שער]+\s*[א-ת]+)/);
+          const chapterMatch = para.match(new RegExp(`^(${chapterPrefixes.join('|')})\\s*[א-ת]+`));
           if (chapterMatch) {
             currentChapter = getChapterIdentifier(book.name, nextChapterNumber);
             skip = false;
