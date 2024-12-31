@@ -4,9 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>הלימוד היומי</title>
+  
   <!-- הוספת ספריית Awesomplete -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.css" integrity="sha512-sEJh6YmVxJJZpLR9GVv+rWAd1x9gpEN2MZ7Q1Dg/YuL1/TPfJm2/32x9vQjqT9oxnR2DFlkZePpD5x3e1wL9wA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.js" integrity="sha512-WBF5l9zwDLWyZwfhP5X34aP2R5hwvBcH0Iqc7zLAXe5aip4HmS4iO3c0wtmdh6vgkBGO1BCFjC+0jWY0IrILBA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  
+  <!-- הוספת ספריית Fuse.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fuse.js/6.6.2/fuse.min.js" integrity="sha512-1u8sF2Mgdf5Mx3rbHbiO2A7cX+YY3PW5tE9F93tVC1Y23sWJmp+hjPEd1nSfCSeYg6oUxP2x0qPzstqE7K/GwA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   
   <style>
     body {
@@ -169,7 +173,7 @@
   <div id="addBookContainer" class="box">
     <h2>טופס הוספת לימוד יומי</h2>
     <label for="bookName">שם הספר (למשל: מסילת ישרים):</label>
-    <input type="text" id="bookName" placeholder="מסילת ישרים" required class="awesomplete" />
+    <input type="text" id="bookName" placeholder="מסילת ישרים" required />
 
     <label for="wordCount">כמות מילים יומית (לדוגמה: 300):</label>
     <input type="number" id="wordCount" placeholder="300" min="1" required />
@@ -404,12 +408,33 @@
       return determineChapterPrefix(bookName, chapterNumber);
     }
 
+    // הוספת מיפוי שמות ספרים אלטרנטיביים
+    const bookNameMappings = {
+      "מסילת ישרים": ["מסילת-ישרים", "מסילת ישרים ר' אבן-עזרא", "מ. ישרים"],
+      "קיצור שולחן ערוך": ["שולחן ערוך קצר", "שולחן ערוך"],
+      // ניתן להוסיף כאן מיפויים נוספים לפי הצורך
+    };
+
+    // פונקציה לקבלת שם הספר הממופה (אם קיים)
+    function getMappedBookName(inputName) {
+      for (const [key, aliases] of Object.entries(bookNameMappings)) {
+        if (aliases.some(alias => alias.toLowerCase() === inputName.toLowerCase())) {
+          return key;
+        }
+      }
+      return null;
+    }
+
     // פונקציה לשליפת שמות הספרים מ-Sefaria
     async function fetchBookNames() {
       // בדיקת מטמון ב-localStorage
       const cachedBooks = localStorage.getItem("bookNames");
       if (cachedBooks) {
-        return JSON.parse(cachedBooks);
+        const cacheData = JSON.parse(cachedBooks);
+        const oneDay = 24 * 60 * 60 * 1000;
+        if ((Date.now() - cacheData.timestamp) < oneDay) {
+          return cacheData.bookNames;
+        }
       }
 
       try {
@@ -449,41 +474,50 @@
       return books;
     }
 
-    // פונקציה לאתחול Awesomplete
-    async function initializeAutocomplete() {
+    // אתחול Fuse.js
+    let fuse;
+    async function initializeFuse() {
       const bookNames = await fetchBookNames();
-      
-      // פילטור שמות הספרים לפי קטגוריות רלוונטיות אם יש צורך
-      // לדוגמה, לבחור רק ספרים בתנ"ך או בספרות ההלכה
-      // כאן נניח שכל הספרים רלוונטיים
-
-      // אתחול Awesomplete
-      new Awesomplete(document.getElementById("bookName"), {
-        list: bookNames,
-        minChars: 2,
-        maxItems: 10,
-        autoFirst: true,
-        sort: true,
-        filter: Awesomplete.FILTER_CONTAINS,
-        replace: function(suggestion) {
-          this.input.value = suggestion;
-        }
+      fuse = new Fuse(bookNames, {
+        includeScore: true,
+        threshold: 0.4 // התאמת רגישות בהתאם לצורך
       });
     }
 
-    // הוספת מיפוי שמות ספרים אם רוצים
-    const bookNameMappings = {
-      // ניתן להוסיף כאן מיפויים אם רוצים (לא חובה עם אוטוקומפליט)
-    };
-
-    // פונקציה לקבלת שם הספר הממופה (אם קיים)
-    function getMappedBookName(inputName) {
-      for (const [key, aliases] of Object.entries(bookNameMappings)) {
-        if (aliases.some(alias => alias.toLowerCase() === inputName.toLowerCase())) {
-          return key;
+    // פונקציה לאתחול Awesomplete עם Fuse.js
+    async function initializeAutocomplete() {
+      await initializeFuse();
+      const bookNameInput = document.getElementById("bookName");
+      const awesomplete = new Awesomplete(bookNameInput, {
+        minChars: 2,
+        maxItems: 10,
+        autoFirst: true,
+        sort: false,
+        filter: function(text, input) {
+          return Fuse.utils.escapeRegex(input).test(text) || this.FILTER_CONTAINS(text, input);
         }
-      }
-      return null;
+      });
+
+      // מאזין לאירוע input כדי לעדכן את הרשימה עם Fuse.js
+      bookNameInput.addEventListener("input", function() {
+        const input = bookNameInput.value.trim();
+        if (input.length < 2) {
+          awesomplete.list = [];
+          return;
+        }
+        const results = fuse.search(input);
+        const suggestions = results.slice(0, 10).map(result => result.item);
+        awesomplete.list = suggestions;
+      });
+
+      // מאזין לבחירת פריט כדי למפות שם אלטרנטיבי
+      bookNameInput.addEventListener("awesomplete-selectcomplete", function() {
+        const selected = bookNameInput.value.trim();
+        const mappedName = getMappedBookName(selected);
+        if (mappedName) {
+          bookNameInput.value = mappedName;
+        }
+      });
     }
 
     // הוספת לימוד חדש
@@ -499,7 +533,7 @@
         return;
       }
 
-      // המרת שם הספר לפי מיפוי (לא חובה אם משתמשים באוטוקומפליט)
+      // המרת שם הספר לפי מיפוי
       const mappedBookName = getMappedBookName(bookNameInput);
       if (mappedBookName) {
         bookNameInput = mappedBookName;
@@ -1003,14 +1037,9 @@
       }
     }
 
-    // פונקציה להוספת השמות ל-Awesomplete במידת הצורך
-    function setupAwesomplete() {
-      // כבר מטופל בפונקציה initializeAutocomplete
-    }
-
     // בעת טעינת הדף
     window.onload = async function() {
-      await initializeAutocomplete(); // אתחול האוטוקומפליט
+      await initializeAutocomplete(); // אתחול האוטוקומפליט עם Fuse.js
       dailyCheck();
       renderBooks();
       setupKeyboardShortcuts();
@@ -1018,4 +1047,4 @@
     };
   </script>
 </body>
-  </html>
+</html>
