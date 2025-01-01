@@ -91,7 +91,7 @@
       font-size: 1rem;
       line-height: 1.6;
       white-space: pre-line;
-      display: none; /* מוסתר כברירת מחדל */
+      display: block; /* שונה מ-"none" כדי להציג את הקטע הנוכחי */
       border-top: 1px solid #eee; /* הפרדה עדינה בין הכותרת למקטע */
       padding-top: 10px;
     }
@@ -154,6 +154,7 @@
       margin-top: 10px;
       cursor: pointer;
       user-select: none;
+      position: relative; /* הוסף כדי לאפשר מיקום נכון של ה-checkbox */
     }
     .checkboxContainer input {
       position: absolute;
@@ -552,6 +553,19 @@
           }
           book.lastAccessDate = today;
         }
+
+        // במצב accumulate, הוסף קטע חדש אם אין קטע חדש היום
+        if (book.mode === "accumulate") {
+          const latestChapter = book.chapters[book.chapters.length - 1];
+          if (latestChapter) {
+            const latestChunk = latestChapter.chunks[latestChapter.chunks.length - 1];
+            if (latestChunk.date !== today) {
+              // כאן צריך להגדיר איך לטעון קטע חדש, לדוגמה:
+              // loadNextChunk(book, today);
+              // כרגע לא נטען אוטומטית
+            }
+          }
+        }
       });
       localStorage.setItem("books", JSON.stringify(books));
     }
@@ -688,7 +702,7 @@
           // בדיקה אם הפסקה מתחילה בפרק עם תחיליות שונות
           const chapterMatch = para.match(new RegExp(`^(${chapterPrefixes.join('|')})\\s*[א-ת]+`));
           if (chapterMatch) {
-            currentChapter = getChapterIdentifier(book.name, nextChapterNumber);
+            currentChapter = getChapterIdentifier(book.name, nextChapterNumber + processedParagraphs.length);
             skip = false;
             continue; // לא כולל את כותרת הפרק כפרק
           }
@@ -729,7 +743,12 @@
         }
 
         // הוספת הפרק החדש לספר
-        book.chapters.push(chaptersList[0]);
+        book.chapters.push({
+          chapterNumber: chaptersList[0].chapterNumber,
+          chapterIdentifier: chaptersList[0].chapterIdentifier,
+          text: chaptersList[0].text,
+          chunks: chaptersList[0].chunks
+        });
 
         // עדכון latestChapterIndex במצב 'block' אם רלוונטי
         if (book.mode === "accumulate") {
@@ -766,7 +785,7 @@
         titleDiv.className = "bookTitle";
         const currentChapter = book.chapters[book.currentChapterIndex];
         if (!currentChapter) return;
-        const currentChunk = currentChapter.chunks[book.currentChunkIndex];
+        const currentChunk = book.chapters[book.currentChapterIndex].chunks[book.currentChunkIndex];
         titleDiv.textContent = `${book.name} - ${currentChapter.chapterIdentifier} קטע ${book.currentChunkIndex + 1} מתוך ${currentChapter.chunks.length}`;
         titleDiv.onclick = () => toggleExpandedView(book.id);
         bookDiv.appendChild(titleDiv);
@@ -784,6 +803,7 @@
             <span class="labelText">סמן כנלמד</span>
           </label>
         `;
+        chunkDiv.style.display = "block"; // הצגת הקטע הנוכחי כברירת מחדל
         bookDiv.appendChild(chunkDiv);
 
         // כפתורי ניווט והסרה
@@ -957,4 +977,4 @@
     };
   </script>
 </body>
-  </html>
+</html>
