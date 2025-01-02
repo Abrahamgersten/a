@@ -358,7 +358,7 @@
       return errors;
     }
 
-    // דיבאונס לרינדור
+    // דיבאונסינג לרינדור
     function debounce(func, wait) {
       let timeout;
       return function executedFunction(...args) {
@@ -370,6 +370,7 @@
         timeout = setTimeout(later, wait);
       };
     }
+
     const debouncedRenderBooks = debounce(renderBooks, 250);
 
     // מציג/מסתיר את טופס הוספת לימוד
@@ -446,6 +447,29 @@
       return determineChapterPrefix(bookName, chapterNumber);
     }
 
+    // פונקציית ולידציה למצבי הספר (מיקומים וכו')
+    function validateBookState(book) {
+      if (book.currentChapterIndex == null) book.currentChapterIndex = 0;
+      if (book.currentChunkIndex == null) book.currentChunkIndex = 0;
+      if (book.latestChapterIndex == null) book.latestChapterIndex = 0;
+      if (!book.readChapters) book.readChapters = [];
+      if (!book.lastAccessDate) book.lastAccessDate = "";
+
+      // וידוא שהאינדקסים בטווח תקין
+      if (book.currentChapterIndex >= book.chapters.length) {
+        book.currentChapterIndex = book.chapters.length - 1;
+      }
+      if (
+        book.currentChapterIndex >= 0 &&
+        book.chapters[book.currentChapterIndex] &&
+        book.currentChunkIndex >= book.chapters[book.currentChapterIndex].chunks.length
+      ) {
+        book.currentChunkIndex = book.chapters[book.currentChapterIndex].chunks.length - 1;
+      }
+      if (book.currentChapterIndex < 0) book.currentChapterIndex = 0;
+      if (book.currentChunkIndex < 0) book.currentChunkIndex = 0;
+    }
+
     // הוספת לימוד חדש
     async function addBook() {
       const bookNameInput = document.getElementById("bookName").value.trim();
@@ -481,8 +505,8 @@
         let skip = true;
         let currentChapter = getChapterIdentifier(bookNameInput, 1); // התחלת הפרק הראשון
 
-        // הגדרת chapterPrefixes
-        const chapterPrefixes = ["פרק", "סימן"]; // יש להתאים למיפוי הספרים
+        // הגדרת chapterPrefixes לפי מה שיש במיפוי
+        const chapterPrefixes = Object.values(bookMappings).flatMap(mapping => mapping.prefixWord); // ["פרק","סימן"]
 
         for (let para of textArray) {
           // בדיקה אם הפסקה מתחילה באחד הסעיפים הלא רצויים
@@ -548,9 +572,12 @@
           lastAccessDate: ""
         };
 
-        // הוספת dateAssigned למקטעים של הפרק הראשון
+        // במצב accumulate – רק הקטע הראשון של הפרק הראשון יינתן להיום
+        // במצב block – נישאר עם ההגדרה הנוכחית
         const today = new Date().toISOString().split("T")[0];
-        newBook.chapters[0].chunks.forEach(chunk => { chunk.dateAssigned = today; });
+        if (mode === "accumulate" && newBook.chapters[0].chunks.length > 0) {
+          newBook.chapters[0].chunks[0].dateAssigned = today;
+        }
 
         books.push(newBook);
         localStorage.setItem("books", JSON.stringify(books));
@@ -569,29 +596,35 @@
     /*
       פונקציה שבודקת בכל יום חדש אם צריך ליצור מקטע חדש (accumulate)
       או לבדוק חסימות (block).
-      - accumulate: בכל יום חדש ננסה להקצות (assign) מקטע חדש (אם יש) לפרק הנוכחי (או לפרק הבא, לפי הצורך).
-        * מקטעים ישנים שלא סומנו – נשארים. 
-        * מקטעים שסומנו כנקראו – אינם מופיעים יותר.
-      - block: אם הפרק האחרון נקרא, נוכל להתקדם, אחרת לא.
     */
-    function dailyCheck() {
+    async function dailyCheck() {
       const today = new Date().toISOString().split("T")[0];
-      books.forEach(book => {
+      for (let book of books) {
         if (book.lastAccessDate !== today) {
           if (book.mode === "accumulate") {
-            assignNewChunkForAccumulate(book, today);
+            await assignNewChunkForAccumulate(book, today);
           }
           else if (book.mode === "block") {
-            const prevChapter = book.latestChapterIndex;
-            if (book.readChapters.includes(prevChapter)) {
-              if (book.latestChapterIndex < book.chapters.length - 1) {
-                book.latestChapterIndex++;
+            // במצב block, אם כל המקטעים של הפרק הנוכחי נקראו, מתקדמים
+            const currentChapter = book.chapters[book.currentChapterIndex];
+            if (currentChapter && currentChapter.chunks.every(chunk => chunk.read)) {
+              // אם נותר פרק נוסף טעון - נעבור אליו
+              if (book.currentChapterIndex < book.chapters.length - 1) {
+                book.currentChapterIndex++;
+                book.currentChunkIndex = 0;
+              } else {
+                // אם אין, ננסה לטעון פרק חדש
+                const success = await loadNextChapter(book);
+                if (success) {
+                  book.currentChapterIndex++;
+                  book.currentChunkIndex = 0;
+                }
               }
             }
           }
           book.lastAccessDate = today;
         }
-      });
+      }
       localStorage.setItem("books", JSON.stringify(books));
     }
 
@@ -647,7 +680,7 @@
         let skip = true;
         let currentChapter = nextChapterIdentifier; // התחלת הפרק הבא
 
-        const chapterPrefixes = ["פרק", "סימן"]; // יש להתאים למיפוי הספרים
+        const chapterPrefixes = Object.values(bookMappings).flatMap(mapping => mapping.prefixWord); // ["פרק", "סימן"]
 
         for (let para of textArray) {
           // בדיקה אם הפסקה מתחילה באחד הסעיפים הלא רצויים
@@ -679,7 +712,7 @@
         }
 
         // חלוקה לפרקים
-        const chaptersMap = {}; // מיפוי פרקים לטקסט שלהם
+        const chaptersMap = {}; 
         processedParagraphs.forEach(para => {
           if (!chaptersMap[para.chapter]) {
             chaptersMap[para.chapter] = [];
@@ -690,7 +723,7 @@
         // יצירת רשימת פרקים
         const chaptersList = Object.keys(chaptersMap).map((chapterIdentifier, index) => ({
           chapterNumber: nextChapterNumber + index,
-          chapterIdentifier: chapterIdentifier, // שמירה על המזהה המלא
+          chapterIdentifier: chapterIdentifier,
           text: chaptersMap[chapterIdentifier].join('\n\n'),
           chunks: splitIntoChunks(chaptersMap[chapterIdentifier].join('\n\n'), book.wordCount)
         }));
@@ -723,7 +756,7 @@
       }
     }
 
-    // פונקציה לסימון מקטע (accumulate או block) - לחיצה על צ'קבוקס
+    // פונקציה לסימון מקטע
     function toggleChunkRead(bookId, chapterIndex, chunkIndex) {
       const book = books.find(b => b.id === bookId);
       if (!book) return;
@@ -733,7 +766,7 @@
 
       chapter.chunks[chunkIndex].read = !chapter.chunks[chunkIndex].read;
 
-      // במצב block, אם כל המקטעים של הפרק נקראו – נוסיף לרשימת readChapters
+      // במצב block, אם כל המקטעים נקראו – נוסיף לרשימת readChapters (לא חובה, אבל אופציונלי)
       if (book.mode === "block") {
         const allRead = chapter.chunks.every(c => c.read);
         if (allRead && !book.readChapters.includes(chapterIndex)) {
@@ -741,8 +774,54 @@
         }
       }
 
-      // במצב accumulate, אם הסימן נקרא, כבר לא יופיע
-      // ניתן להוסיף לוגיקה נוספת אם נדרש
+      localStorage.setItem("books", JSON.stringify(books));
+      debouncedRenderBooks();
+    }
+
+    // פונקציות ניווט במצב block
+    async function goToNextDay(bookId) {
+      const book = books.find(b => b.id === bookId);
+      if (!book || book.mode !== "block") return;
+
+      const currentChapter = book.chapters[book.currentChapterIndex];
+      if (!currentChapter) return;
+
+      // אם יש עוד מקטעים בפרק הנוכחי
+      if (book.currentChunkIndex < currentChapter.chunks.length - 1) {
+        book.currentChunkIndex++;
+      } 
+      // אם צריך לעבור לפרק הבא (אם כבר טענו אותו)
+      else if (book.currentChapterIndex < book.latestChapterIndex) {
+        book.currentChapterIndex++;
+        book.currentChunkIndex = 0;
+      }
+      // אם הגענו לסוף הפרק האחרון הזמין
+      else {
+        const success = await loadNextChapter(book);
+        if (success) {
+          book.currentChapterIndex++;
+          book.currentChunkIndex = 0;
+        }
+      }
+
+      localStorage.setItem("books", JSON.stringify(books));
+      debouncedRenderBooks();
+    }
+
+    function goToPrevDay(bookId) {
+      const book = books.find(b => b.id === bookId);
+      if (!book || book.mode !== "block") return;
+
+      // אם יש מקטע קודם בפרק הנוכחי
+      if (book.currentChunkIndex > 0) {
+        book.currentChunkIndex--;
+      } 
+      // אם צריך לחזור לפרק הקודם
+      else if (book.currentChapterIndex > 0) {
+        book.currentChapterIndex--;
+        const prevChapter = book.chapters[book.currentChapterIndex];
+        book.currentChunkIndex = prevChapter.chunks.length - 1;
+      }
 
       localStorage.setItem("books", JSON.stringify(books));
       debouncedRenderBooks();
@@ -757,6 +836,8 @@
         container.innerHTML = "<p>לא הוספת לימודים עדיין.</p>";
         return;
       }
+
+      const today = new Date().toISOString().split("T")[0];
 
       books.forEach(book => {
         const bookDiv = document.createElement("div");
@@ -776,7 +857,6 @@
           }
         } else {
           // accumulate
-          const today = new Date().toISOString().split("T")[0];
           let todayChunk = null;
           let todayChapterIndex = -1;
           let todayChunkIndex = -1;
@@ -798,8 +878,22 @@
           if (todayChunk) {
             titleDiv.textContent = `${book.name} - ${book.chapters[todayChapterIndex].chapterIdentifier} קטע ${todayChunkIndex + 1} מתוך ${book.chapters[todayChapterIndex].chunks.length}`;
           } else {
-            // אם אין מקטע היום, מייצגים את המקטע האחרון שהוקצה
-            titleDiv.textContent = `${book.name} - אין מקטע חדש ליום זה`;
+            // אם אין מקטע היום, מייצגים את המקטע האחרון שהוקצה או אין מקטע חדש
+            const assignedChunks = [];
+            book.chapters.forEach((chapter, chIndex) => {
+              chapter.chunks.forEach((chunk, cIndex) => {
+                if (chunk.dateAssigned && chunk.dateAssigned <= today && !chunk.read) {
+                  assignedChunks.push({ chIndex, cIndex, chunk });
+                }
+              });
+            });
+
+            if (assignedChunks.length > 0) {
+              const lastAssigned = assignedChunks[assignedChunks.length - 1];
+              titleDiv.textContent = `${book.name} - ${book.chapters[lastAssigned.chIndex].chapterIdentifier} קטע ${lastAssigned.cIndex + 1} מתוך ${book.chapters[lastAssigned.chIndex].chunks.length}`;
+            } else {
+              titleDiv.textContent = `${book.name} - אין מקטע חדש ליום זה`;
+            }
           }
         }
 
@@ -829,20 +923,27 @@
                 chunk: currentChunk,
                 chapterIdentifier: currentChapter.chapterIdentifier
               });
+
+              // מציג את הקטע באופן אוטומטי במצב block
+              setTimeout(() => {
+                const chunkElement = document.getElementById(`chunk-${book.id}-${book.currentChapterIndex}-${book.currentChunkIndex}`);
+                if (chunkElement) {
+                  chunkElement.style.display = "block";
+                }
+              }, 0);
             }
           }
         } else {
           // accumulate
-          const today = new Date().toISOString().split("T")[0];
           for (let chIndex = 0; chIndex < book.chapters.length; chIndex++) {
             const chapter = book.chapters[chIndex];
-            for (let i = 0; i < chapter.chunks.length; i++) {
-              const chunk = chapter.chunks[i];
+            for (let cIndex = 0; cIndex < chapter.chunks.length; cIndex++) {
+              const chunk = chapter.chunks[cIndex];
               // אם המקטע הוקצה היום או בעבר, ועדיין לא נקרא
               if (chunk.dateAssigned && chunk.dateAssigned <= today && !chunk.read) {
                 chunksToRender.push({
                   chapterIndex: chIndex,
-                  chunkIndex: i,
+                  chunkIndex: cIndex,
                   chunk: chunk,
                   chapterIdentifier: chapter.chapterIdentifier
                 });
@@ -860,7 +961,7 @@
           const singleChunkDiv = document.createElement("div");
           singleChunkDiv.className = "singleChunkContainer";
 
-          // כותרת משנה (מציג תאריך השיוך)
+          // כותרת משנה (מציג תאריך השיוך או שם הפרק)
           const subTitle = document.createElement("div");
           subTitle.textContent = `${chapterIdentifier}`;
           singleChunkDiv.appendChild(subTitle);
@@ -871,8 +972,8 @@
           chunkP.id = `chunk-${book.id}-${chapterIndex}-${chunkIndex}`;
           chunkP.textContent = chunk.text;
 
-          // מציג את הקטע כברירת מחדל אם הוא מקטע היום
-          if (book.mode === "accumulate" && chunk.dateAssigned === new Date().toISOString().split("T")[0]) {
+          // במצב accumulate - מקטע של היום מוצג אוטומטית
+          if (book.mode === "accumulate" && chunk.dateAssigned === today) {
             chunkP.style.display = "block";
           }
 
@@ -885,7 +986,7 @@
           const checkbox = document.createElement("input");
           checkbox.type = "checkbox";
           checkbox.className = "customCheckbox";
-          checkbox.checked = chunk.read; // אם כבר סומן, נציג מסומן
+          checkbox.checked = chunk.read;
           checkbox.onchange = () => toggleChunkRead(book.id, chapterIndex, chunkIndex);
 
           const label = document.createElement("label");
@@ -894,7 +995,6 @@
           checkboxContainer.appendChild(checkbox);
           checkboxContainer.appendChild(label);
 
-          // נמקם את הצ'קבוקס בתחתית המקטע
           singleChunkDiv.appendChild(checkboxContainer);
 
           // הוספת קו מפריד
@@ -1014,14 +1114,31 @@
       return null;
     }
 
-    // סימון הקטע הנוכחי כנקרא דרך קיצור מקלדת
+    // סימון הקטע הנוכחי כנקרא דרך קיצור מקלדת (לא שינינו)
     function markCurrentChunkAsRead(bookId) {
       const book = books.find(b => b.id === bookId);
       if (!book) return;
       markChunkAsRead(bookId, book.currentChapterIndex, book.currentChunkIndex);
     }
 
-    // תמיכה בסיסית בסוואייפ במובייל
+    // פונקציית סימון - נשארת כבעבר (לא נגענו)
+    function markChunkAsRead(bookId, chapterIndex, chunkIndex) {
+      const book = books.find(b => b.id === bookId);
+      if (!book) return;
+
+      const chapter = book.chapters[chapterIndex];
+      if (!chapter) return;
+
+      chapter.chunks[chunkIndex].read = true;
+      if (!book.readChapters.includes(chapterIndex)) {
+        book.readChapters.push(chapterIndex);
+      }
+
+      localStorage.setItem("books", JSON.stringify(books));
+      debouncedRenderBooks();
+    }
+
+    // תמיכה במובייל - סוואיפים (נשאר כנ"ל)
     function setupMobileSwipeSupport() {
       let touchstartX = 0;
       let touchendX = 0;
@@ -1057,12 +1174,15 @@
     }
 
     // בעת טעינת הדף
-    window.onload = function() {
-      dailyCheck();      // בדיקת יום חדש
-      renderBooks();     // הצגת כל הספרים
+    window.onload = async function() {
+      // ולידציה בסיסית של כל ספר (קריאות מתחילות)
+      books.forEach(validateBookState);
+
+      await dailyCheck();      // בדיקת יום חדש (accumulate/block)
+      renderBooks();           // הצגת כל הספרים
       setupKeyboardShortcuts();
       setupMobileSwipeSupport();
     };
   </script>
 </body>
-  </html
+</html>
